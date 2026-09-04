@@ -99,6 +99,7 @@
 | [05-inference.md](05-inference.md) | 计算推理：蒸馏、世界内推演、跨世界投影、检索注入、完整认知循环 |
 | [06-api.md](06-api.md) | 数据面与推理面 API 契约草案、事件/条目 schema |
 | [07-evaluation.md](07-evaluation.md) | 指标、对照实验、失效条件、路线图 |
+| [10-algorithmic-core.md](10-algorithmic-core.md) | 符号推理内核：让事实推理脱离 LLM 依赖（确定性、可验证） |
 
 ## 7. 一句话
 
