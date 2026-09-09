@@ -23,13 +23,18 @@
 
 每个基岩事件、每条声称/共识对象都有内容哈希 id：
 
+写入格式在 M1 就固定为**三列**（内容寻址与哈希链是两种职责，不能压在一个键上）：
+
 ```
-event_id  = H(事件负载 + 前件哈希)   // 哈希链：篡改即暴露
-claim_id  = H(quad 负载 + schemaVersion)
+content_hash = H(canonical(payload) + schemaVersion)              // 去重/幂等：同内容必同键
+link         = H(content_hash + prev_chain_hash + scope_seq)      // 因果/审计/篡改可见
+claim_key    = H(subject_key ‖ predicate ‖ object ‖ worldId ‖ norm_ver)  // 声称去重
 ```
 
-- 哈希链让任何篡改在副本间立刻可见——"忠实性"的数学保证；
-- 内容寻址天然支持去重与合并（同一事件从两个来源到达 = 同一 id）。
+- **content_hash 只对"事件本质"寻址**：`canonical(payload)` 必须明确定义参与字段集——排除 `recordedAt`、来源、传输噪声；`observedAt` 也不参与（否则多来源时间戳差异会导致同一事件分裂），仅作为事件属性保存；
+- **link 承载哈希链**：篡改任一字节或截断尾部，验证器必须报错（忠实性的数学保证）；
+- 链形态：**per-scope 单调 seq 的局部链 + 跨 scope 因果 DAG**（与 §3.2 一致），不是一条全局链——否则并发写者要么被迫串行化（单点），要么分叉后无法验证；
+- 若去重键取含前件的 `event_id`，重蒸馏会产出全新 id，历史 claim 的证据引用将悬空、supersedes 链断裂——直接违反不变式①与⑤。
 
 ### 2.2 稳定实体 ID（保连续）
 
