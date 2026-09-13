@@ -7,6 +7,12 @@ import (
 	"unicode/utf8"
 )
 
+// maxDisplayRunes 限制单条记忆在列表与注入块里的显示长度。
+//
+// 文档原文可达上千字，整段铺开会把检索结果冲垮；截断后仍保留足够的
+// 辨识度，需要全文时可按 id 追溯或直接读源文件。
+const maxDisplayRunes = 120
+
 // Format 渲染单条记忆，标注它是当前值还是历史值。
 func (e Entry) Format() string {
 	marker := "[历史]"
@@ -15,13 +21,26 @@ func (e Entry) Format() string {
 	}
 
 	line := fmt.Sprintf("- %s %s %s %s（记于 %s）",
-		marker, e.Event.Subject, e.Event.Predicate, e.Event.Object, ShortTime(e.Event.EffectiveObservedAt()))
+		marker, e.Event.Subject, e.Event.Predicate,
+		abbreviate(e.Event.Object), ShortTime(e.Event.EffectiveObservedAt()))
 
 	if e.SupersededBy != "" {
 		line += "（已被后续记录更新）"
 	}
 
 	return line
+}
+
+// abbreviate 把多行文本压成单行并截断，供列表与注入使用。
+func abbreviate(text string) string {
+	flat := strings.Join(strings.Fields(text), " ")
+
+	runes := []rune(flat)
+	if len(runes) <= maxDisplayRunes {
+		return flat
+	}
+
+	return string(runes[:maxDisplayRunes]) + "…"
 }
 
 // Render 生成可直接拼入 prompt 的文本。

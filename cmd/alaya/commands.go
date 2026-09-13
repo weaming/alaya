@@ -25,7 +25,9 @@ func runClaim(args []string) {
 	supersedes := flags.String("supersedes", "", "被本条更新取代的旧记录 id")
 	observedAt := flags.String("observed-at", "", "该断言在现实中成立的时间（RFC3339）")
 	note := flags.String("note", "", "补充说明或原文出处")
-	flags.Parse(args)
+	scope := flags.String("scope", models.DefaultScope, "声称者所在的 scope")
+	world := flags.String("world", models.DefaultWorld, "真值所在的世界")
+	parseArgs(flags, args)
 
 	if *subject == "" || *predicate == "" {
 		log.Fatal("用法: alaya claim --subject <主体> --predicate <谓词> --object <值>")
@@ -41,6 +43,8 @@ func runClaim(args []string) {
 		Supersedes: *supersedes,
 		ObservedAt: *observedAt,
 		Note:       *note,
+		Scope:      *scope,
+		World:      *world,
 	})
 	if err != nil {
 		log.Fatalf("写入记忆: %v", err)
@@ -58,16 +62,24 @@ func runSearch(args []string) {
 	flags := flag.NewFlagSet("search", flag.ExitOnError)
 	query := flags.String("query", "", "检索词，支持中英文")
 	limit := flags.Int("limit", 10, "返回条数上限")
-	flags.Parse(args)
+	scope := flags.String("scope", "", "仅返回该 scope 内的记忆；缺省不过滤")
+	world := flags.String("world", "", "仅返回该世界内的记忆；缺省不过滤")
+	positional := parseArgs(flags, args)
 
-	if *query == "" {
-		log.Fatal("请通过 --query 给出检索词")
+	// 位置参数回退：alaya search <关键词> 比 --query 更自然
+	target := *query
+	if target == "" {
+		target = strings.Join(positional, " ")
+	}
+
+	if target == "" {
+		log.Fatal("用法: alaya search <关键词>")
 	}
 
 	mem := openMemory()
 	defer mem.Close()
 
-	entries := mem.Search(*query, *limit)
+	entries := mem.SearchIn(target, *limit, *world, *scope)
 	if len(entries) == 0 {
 		fmt.Println("没有找到匹配的记忆。")
 		return
@@ -82,51 +94,87 @@ func runHistory(args []string) {
 	flags := flag.NewFlagSet("history", flag.ExitOnError)
 	subject := flags.String("subject", "", "要追溯的主体")
 	predicate := flags.String("predicate", "", "限定谓词，只看某个维度的演变")
-	flags.Parse(args)
+	scope := flags.String("scope", "", "仅追溯该 scope 内的演变；缺省不过滤")
+	world := flags.String("world", "", "仅追溯该世界内的演变；缺省不过滤")
+	positional := parseArgs(flags, args)
 
-	if *subject == "" && *predicate == "" {
-		log.Fatal("请通过 --subject 给出主体，或用 --predicate 限定维度")
+	// 位置参数回退：alaya history <主体> 比 --subject 更自然
+	target := *subject
+	if target == "" {
+		target = strings.Join(positional, " ")
+	}
+
+	if target == "" && *predicate == "" && *scope == "" && *world == "" {
+		log.Fatal("用法: alaya history <主体>，或用 --predicate / --scope / --world 限定范围")
 	}
 
 	mem := openMemory()
 	defer mem.Close()
 
-	entries := mem.Timeline(*subject, *predicate)
+	entries := mem.TimelineIn(target, *predicate, *world, *scope)
 	if len(entries) == 0 {
 		fmt.Println("没有找到该主体的记忆。")
 		return
 	}
 
-	fmt.Printf("## 记忆演变（%d 条）\n\n", len(entries))
+	fmt.Printf("## %s 的记忆（%d 条）\n\n", historyTitle(target, *predicate, *world, *scope), len(entries))
 	for _, entry := range entries {
 		fmt.Printf("%s\n  id: %s\n", entry.Format(), entry.Event.ID)
 	}
 }
 
-func runStats() {
+func runStats(args []string) {
+	flags := flag.NewFlagSet("stats", flag.ExitOnError)
+	scope := flags.String("scope", "", "仅统计该 scope；缺省统计全部")
+	world := flags.String("world", "", "仅统计该世界；缺省统计全部")
+	parseArgs(flags, args)
+
 	mem := openMemory()
 	defer mem.Close()
-
-	events := mem.Events()
-	current, historical := mem.SplitByCurrency()
 
 	scopes := make(map[string]struct{})
 	subjects := make(map[string]struct{})
 
-	var earliest, latest models.Event
-	hasLatest := false
+	var (
+		events     []models.Event
+		current    int
+		historical int
+		earliest   models.Event
+		latest     models.Event
+		hasLatest  bool
+	)
 
-	for _, event := range events {
-		scopes[event.Scope] = struct{}{}
-		subjects[event.Subject] = struct{}{}
-
-		if !hasLatest || models.CompareObserved(event, earliest) < 0 {
-			earliest = event
+	// 单次遍历同时完成过滤与归类，避免为 scope 过滤再扫一遍全量
+	for _, entry := range mem.Annotated() {
+		if *world != "" && entry.Event.World != *world {
+			continue
 		}
-		if !hasLatest || models.CompareObserved(event, latest) > 0 {
-			latest = event
+		if *scope != "" && entry.Event.Scope != *scope {
+			continue
+		}
+
+		events = append(events, entry.Event)
+		scopes[entry.Event.Scope] = struct{}{}
+		subjects[entry.Event.Subject] = struct{}{}
+
+		if entry.IsCurrent {
+			current++
+		} else {
+			historical++
+		}
+
+		if !hasLatest || models.CompareObserved(entry.Event, earliest) < 0 {
+			earliest = entry.Event
+		}
+		if !hasLatest || models.CompareObserved(entry.Event, latest) > 0 {
+			latest = entry.Event
 		}
 		hasLatest = true
+	}
+
+	if len(events) == 0 {
+		fmt.Println("该范围内没有记忆。")
+		return
 	}
 
 	fmt.Printf("数据目录: %s\n", mem.Dir())
@@ -136,8 +184,8 @@ func runStats() {
 	}
 
 	fmt.Printf("事件总数: %d\n", len(events))
-	fmt.Printf("  当前值: %d\n", len(current))
-	fmt.Printf("  历史值: %d\n", len(historical))
+	fmt.Printf("  当前值: %d\n", current)
+	fmt.Printf("  历史值: %d\n", historical)
 	fmt.Printf("scope 数: %d\n", len(scopes))
 	fmt.Printf("主体数: %d\n", len(subjects))
 
@@ -212,6 +260,20 @@ func writeIndex(mem *memory.Memory, path string) error {
 	}
 
 	return nil
+}
+
+// historyTitle 给演变列表起个能说明「看的是什么范围」的标题。
+func historyTitle(subject, predicate, world, scope string) string {
+	switch {
+	case subject != "":
+		return subject
+	case predicate != "":
+		return predicate
+	case scope != "":
+		return scope
+	default:
+		return world
+	}
 }
 
 func sortBySubject(entries []memory.Entry) {

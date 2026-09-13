@@ -13,11 +13,6 @@ const (
 	maxPerTriple        = 3
 )
 
-// Search 按关键词检索并标注每条结果在断言组中的地位。
-func (m *Memory) Search(query string, limit int) []Entry {
-	return m.SearchIn(query, limit, "", "")
-}
-
 // SearchIn 在给定 world 与 scope 内检索；空值表示不过滤。
 func (m *Memory) SearchIn(query string, limit int, world, scope string) []Entry {
 	// 过滤发生在检索之后，故先多取候选再截断
@@ -49,15 +44,27 @@ func (m *Memory) SearchIn(query string, limit int, world, scope string) []Entry 
 	return m.annotate(events, scores)
 }
 
-// Timeline 返回某主体或某谓词维度的完整历史，按现实时间升序。
-// 两个条件都为空时返回空结果——调用方应至少给出一个。
-func (m *Memory) Timeline(subject, predicate string) []Entry {
-	if subject == "" && predicate == "" {
+// TimelineIn 返回某主体或某谓词维度的历史，按现实时间升序；空值表示不过滤。
+//
+// scope 是 Alaya 的一等轴：同一条断言在不同 scope 下是不同的声称，
+// 混在一起看会把别人的共识当成自己的。
+//
+// 至少要给出一个条件（主体、谓词、world 或 scope）：
+// 全部为空意味着「把整个库倒出来」，那是调用方该显式做的事，
+// 不该由一次疏漏的调用静默完成。
+func (m *Memory) TimelineIn(subject, predicate, world, scope string) []Entry {
+	if subject == "" && predicate == "" && world == "" && scope == "" {
 		return nil
 	}
 
 	matched := make([]models.Event, 0)
 	for _, event := range m.store.Events() {
+		if world != "" && event.World != world {
+			continue
+		}
+		if scope != "" && event.Scope != scope {
+			continue
+		}
 		if subject != "" && event.Subject != subject {
 			continue
 		}
@@ -136,13 +143,13 @@ func fill(entries []Entry, budget int) RecallResult {
 	var (
 		result RecallResult
 		spent  int
-		seen   = make(map[models.Triple]int)
+		seen   = make(map[group]int)
 	)
 
 	result.Budget = budget
 
 	for _, entry := range entries {
-		key := entry.Event.Triple()
+		key := groupOf(entry.Event)
 		if seen[key] >= maxPerTriple {
 			result.Truncated++
 			continue

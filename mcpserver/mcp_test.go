@@ -227,3 +227,40 @@ func TestMCPRejectsMalformedObservedAt(t *testing.T) {
 		t.Fatalf("错误信息应说明格式要求，实际: %s", text)
 	}
 }
+
+// memory_timeline 与 memory_search 都应支持按 scope 过滤，否则两条读取路径
+// 能力不一致，调用方要额外记住哪个能过滤。
+func TestMCPTimelineFiltersByScope(t *testing.T) {
+	session, mem := newTestSession(t)
+	subject := "urn:alaya:test:scope"
+
+	for _, item := range []struct{ object, scope string }{
+		{"香港", "user:garden"},
+		{"东京", "team:alpha"},
+	} {
+		if _, _, err := mem.Add(models.Event{
+			Subject:   subject,
+			Predicate: "lives_in",
+			Object:    item.object,
+			Scope:     item.scope,
+		}); err != nil {
+			t.Fatalf("写入 %s: %v", item.object, err)
+		}
+	}
+
+	result := callTool(t, session, "memory_timeline", map[string]any{
+		"subject": subject,
+		"scope":   "team:alpha",
+	})
+	if result.IsError {
+		t.Fatalf("查询失败: %s", toolText(result))
+	}
+
+	text := toolText(result)
+	if !strings.Contains(text, "东京") {
+		t.Fatalf("应返回该 scope 的记录，实际:\n%s", text)
+	}
+	if strings.Contains(text, "香港") {
+		t.Fatalf("不应返回其它 scope 的记录，实际:\n%s", text)
+	}
+}

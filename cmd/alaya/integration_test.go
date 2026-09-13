@@ -711,3 +711,53 @@ func TestCLIReadOnlyDataDirectory(t *testing.T) {
 		t.Fatalf("只读目录下写入应报告写锁不可用，实际: %s", stderr)
 	}
 }
+
+// 位置参数是比具名标志更自然的写法。早先为规避 flag 的顺序限制而一律
+// 改用 --subject，反倒让 `alaya history <主体>` 直接报「请通过 --subject 给出主体」——
+// 用户明明已经给了主体。两种写法都要能用。
+func TestCLIPositionalAndNamedArguments(t *testing.T) {
+	home := t.TempDir()
+
+	runCLI(t, home, "claim", "--subject", testSubject, "--predicate", "lives_in", "--object", "香港")
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"history 位置参数", []string{"history", testSubject}},
+		{"history 具名标志", []string{"history", "--subject", testSubject}},
+		{"search 位置参数", []string{"search", "香港"}},
+		{"search 具名标志", []string{"search", "--query", "香港"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			out := runCLI(t, home, test.args...)
+			if !strings.Contains(out, "香港") {
+				t.Fatalf("应返回该条记忆，实际:\n%s", out)
+			}
+		})
+	}
+}
+
+// 缺参数时的提示应给出可直接照抄的用法，而不是让用户猜哪里写错了。
+func TestCLIUsageHintsUsePositionalForm(t *testing.T) {
+	home := t.TempDir()
+
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"history"}, "alaya history <主体>"},
+		{[]string{"search"}, "alaya search <关键词>"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.args[0], func(t *testing.T) {
+			stderr := runCLIExpectingFailure(t, home, test.args...)
+			if !strings.Contains(stderr, test.want) {
+				t.Fatalf("提示应含 %q，实际: %s", test.want, stderr)
+			}
+		})
+	}
+}

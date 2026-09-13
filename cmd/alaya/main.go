@@ -31,7 +31,7 @@ func main() {
 	case "history":
 		runHistory(os.Args[2:])
 	case "stats":
-		runStats()
+		runStats(os.Args[2:])
 	case "verify":
 		runVerify()
 	case "rebuild":
@@ -55,13 +55,13 @@ func printUsage() {
 用法:
   alaya mcp [--http :8901]                            启动 MCP server（缺省走 stdio）
   alaya claim --subject S --predicate P --object O    写入一条断言
-  alaya search --query Q [--limit N]                  检索记忆
-  alaya history --subject S [--predicate P]           查看某主体的记忆演变
-  alaya stats                                         统计数据概况
+  alaya search <关键词> [--limit N]                   检索记忆
+  alaya history <主体> [--predicate P]                查看某主体的记忆演变
+  alaya stats [--scope S] [--world W]                 统计数据概况
   alaya verify                                        校验事件日志的完整性
   alaya rebuild                                       从事件日志重建 INDEX.md
 
-标志须置于位置参数之前，故此处一律使用具名标志。
+位置参数与标志可以任意顺序混写。
 数据目录: $ALAYA_HOME，缺省 ~/.alaya
 `, version)
 }

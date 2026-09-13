@@ -97,6 +97,8 @@ type timelineArgs struct {
 	Subject   string `json:"subject,omitempty" jsonschema:"要追溯的主体；与 predicate 至少给出一个"`
 	Predicate string `json:"predicate,omitempty" jsonschema:"限定谓词，用于只看某个维度的演变"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"返回条数上限，缺省 50"`
+	World     string `json:"world,omitempty" jsonschema:"仅追溯该世界内的演变"`
+	Scope     string `json:"scope,omitempty" jsonschema:"仅追溯该 scope 内的演变"`
 }
 
 // handleTimeline 返回某主体（或某谓词维度）的完整演变，含与当前值的关系。
@@ -110,7 +112,7 @@ func (s *server) handleTimeline(_ context.Context, _ *mcp.CallToolRequest, args 
 		limit = 50
 	}
 
-	entries := s.mem.Timeline(args.Subject, args.Predicate)
+	entries := s.mem.TimelineIn(args.Subject, args.Predicate, args.World, args.Scope)
 	if len(entries) == 0 {
 		return textResult("没有找到该主体的记忆。"), nil, nil
 	}

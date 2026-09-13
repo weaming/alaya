@@ -51,6 +51,14 @@ const (
 	DefaultWorld        = "world:real"
 	DefaultScope        = "user:garden"
 	DefaultAttributedBy = "urn:alaya:agent:assistant"
+
+	// KindDocFact 标记从文档抽取的事实。
+	//
+	// 它们与手动声称的语义不同：手动声称按 (subject, predicate) 构成一条属性的
+	// 时间演化（住址从 A 变 B），而文档里的并列条目是同时成立的多条事实
+	// （"有三台相机"不是"相机变过三次"）。混为一谈会让 recall 把并列事实
+	// 标注成"已被更新"，误导使用者。
+	KindDocFact = "doc_fact"
 )
 
 // Triple 标识同一 scope 内的一条断言，用于判定当前值与历史值。

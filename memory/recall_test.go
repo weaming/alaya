@@ -230,7 +230,7 @@ func TestTimelineOrdersByObservedTime(t *testing.T) {
 		}
 	}
 
-	entries := mem.Timeline("urn:alaya:person:user:garden", "")
+	entries := mem.TimelineIn("urn:alaya:person:user:garden", "", "", "")
 	if len(entries) != 2 {
 		t.Fatalf("应返回 2 条，实际 %d", len(entries))
 	}
@@ -252,7 +252,7 @@ func TestCurrentValueFollowsWriteOrderWithoutObservedAt(t *testing.T) {
 		}
 	}
 
-	current := currentObjects(mem.Timeline(subject, ""))
+	current := currentObjects(mem.TimelineIn(subject, "", "", ""))
 
 	if !current["香港"] {
 		t.Fatal("后写入的值应为当前值")
@@ -276,7 +276,7 @@ func TestSameTimestampResolvedBySequence(t *testing.T) {
 		}
 	}
 
-	current := currentObjects(mem.Timeline(subject, ""))
+	current := currentObjects(mem.TimelineIn(subject, "", "", ""))
 
 	if !current["香港"] {
 		t.Fatal("同一时间戳时，序号更大者应为当前值")
@@ -303,7 +303,7 @@ func TestSupersedeWorksWithoutObservedAt(t *testing.T) {
 		t.Fatalf("写入上海: %v", err)
 	}
 
-	current := currentObjects(mem.Timeline(subject, ""))
+	current := currentObjects(mem.TimelineIn(subject, "", "", ""))
 
 	if !current["上海"] {
 		t.Fatal("最后写入的值应为当前值")
@@ -353,7 +353,7 @@ func TestCurrentValueAcrossTimezones(t *testing.T) {
 		t.Fatalf("写入 B: %v", err)
 	}
 
-	current := currentObjects(mem.Timeline(subject, ""))
+	current := currentObjects(mem.TimelineIn(subject, "", "", ""))
 
 	if !current["flight-A(02:00Z)"] {
 		t.Fatal("02:00Z 才是更晚的时刻，应为当前值")
@@ -380,7 +380,7 @@ func TestMixedExplicitAndDefaultObservedAt(t *testing.T) {
 		t.Fatalf("写入显式条目: %v", err)
 	}
 
-	current := currentObjects(mem.Timeline(subject, ""))
+	current := currentObjects(mem.TimelineIn(subject, "", "", ""))
 
 	if !current["缺省"] {
 		t.Fatal("缺省写入的是当前时刻，应为当前值")
@@ -408,13 +408,134 @@ func TestTimelineOrdersAcrossTimezones(t *testing.T) {
 		}
 	}
 
-	entries := mem.Timeline(subject, "")
+	entries := mem.TimelineIn(subject, "", "", "")
 	if len(entries) != 2 {
 		t.Fatalf("应有 2 条，实际 %d", len(entries))
 	}
 
 	if first, second := entries[0].Event.ObservedAt, entries[1].Event.ObservedAt; first != stamps[0] || second != stamps[1] {
 		t.Fatalf("应按时刻升序（01:00Z 在前），实际 %s, %s", first, second)
+	}
+}
+
+// 文档抽取的事实彼此并列，不构成同一属性的时间演化。
+// 混同会让 recall 把并列条目标成"已被更新"——15 台设备里 14 台成了历史值。
+func TestDocFactsAreStandalone(t *testing.T) {
+	mem := newTestMemory(t)
+	subject := "urn:alaya:person:user:garden"
+
+	devices := []string{"Mac mini", "MacBook Pro", "iPhone"}
+	for _, device := range devices {
+		if _, _, err := mem.Add(models.Event{
+			Kind:      models.KindDocFact,
+			Subject:   subject,
+			Predicate: "uses",
+			Object:    device,
+		}); err != nil {
+			t.Fatalf("写入 %s: %v", device, err)
+		}
+	}
+
+	entries := mem.TimelineIn(subject, "", "", "")
+	if len(entries) != len(devices) {
+		t.Fatalf("应有 %d 条，实际 %d", len(devices), len(entries))
+	}
+
+	for _, entry := range entries {
+		if !entry.IsCurrent {
+			t.Fatalf("并列事实都应算当前值，%q 却不是", entry.Event.Object)
+		}
+		if entry.SupersededBy != "" {
+			t.Fatalf("并列事实之间没有取代关系，%q 却被标记了", entry.Event.Object)
+		}
+	}
+}
+
+// 对照：手动声称仍按同一属性的时间演化判定，不受上面改动影响。
+func TestManualClaimsStillEvolve(t *testing.T) {
+	mem := newTestMemory(t)
+	subject := "urn:alaya:person:user:garden"
+
+	for _, city := range []string{"深圳", "香港"} {
+		if _, _, err := mem.Add(models.Event{
+			Subject:   subject,
+			Predicate: "lives_in",
+			Object:    city,
+		}); err != nil {
+			t.Fatalf("写入 %s: %v", city, err)
+		}
+	}
+
+	current := currentObjects(mem.TimelineIn(subject, "", "", ""))
+
+	if !current["香港"] {
+		t.Fatal("后写入的手动声称应为当前值")
+	}
+	if current["深圳"] {
+		t.Fatal("先写入的手动声称应为历史值")
+	}
+}
+
+// 并列事实不受「每断言最多 3 条」的配额限制，否则一节里的多条会被截掉。
+func TestDocFactsBypassPerClaimQuota(t *testing.T) {
+	mem := newTestMemory(t)
+
+	for i := 0; i < 10; i++ {
+		if _, _, err := mem.Add(models.Event{
+			Kind:      models.KindDocFact,
+			Subject:   "urn:alaya:person:user:garden",
+			Predicate: "uses",
+			Object:    fmt.Sprintf("设备%d", i),
+		}); err != nil {
+			t.Fatalf("写入: %v", err)
+		}
+	}
+
+	result := mem.Recall("设备", 8000)
+	if len(result.Entries) != 10 {
+		t.Fatalf("10 条并列事实都应装上，实际 %d 条", len(result.Entries))
+	}
+}
+
+// 文档原文可达上千字，整段铺开会把检索结果冲垮；展示必须压成单行并截断。
+func TestFormatAbbreviatesLongMultilineObject(t *testing.T) {
+	entry := Entry{
+		IsCurrent: true,
+		Event: models.Event{
+			Subject:    "urn:alaya:source:file:/x.md#甲",
+			Predicate:  "content",
+			Object:     "首行内容\n次行内容\n" + strings.Repeat("很长", 200),
+			ObservedAt: "2026-09-14T10:00:00+08:00",
+		},
+	}
+
+	formatted := entry.Format()
+
+	if strings.Contains(formatted, "\n") {
+		t.Fatalf("展示必须压成单行，实际:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "首行内容 次行内容") {
+		t.Fatalf("多行应被压成一行，实际:\n%s", formatted)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(formatted), "…") &&
+		!strings.Contains(formatted, "…") {
+		t.Fatalf("超长内容应截断，实际:\n%s", formatted)
+	}
+}
+
+func TestFormatKeepsShortObjectIntact(t *testing.T) {
+	entry := Entry{
+		IsCurrent: true,
+		Event: models.Event{
+			Subject:    "urn:alaya:person:user:garden",
+			Predicate:  "lives_in",
+			Object:     "Hong Kong",
+			ObservedAt: "2026-09-14T10:00:00+08:00",
+		},
+	}
+
+	if got := entry.Format(); !strings.Contains(got, "Hong Kong") {
+		t.Fatalf("短内容不应被改写，实际 %q", got)
 	}
 }
 

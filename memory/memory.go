@@ -107,13 +107,13 @@ func (m *Memory) resolveState() state {
 		}
 	}
 
-	latest := make(map[models.Triple]models.Event)
+	latest := make(map[group]models.Event)
 	for _, event := range events {
 		if _, isSuperseded := result.supersededBy[event.ID]; isSuperseded {
 			continue
 		}
 
-		key := event.Triple()
+		key := groupOf(event)
 		if prev, ok := latest[key]; !ok || isLater(event, prev) {
 			latest[key] = event
 		}
@@ -136,6 +136,25 @@ func isLater(a, b models.Event) bool {
 	}
 
 	return a.Seq > b.Seq
+}
+
+// group 是当前值判定与条数配额的分组键。
+//
+// 手动声称按 (subject, predicate, world, scope) 分组——同一属性的多次陈述
+// 构成一条时间演化；文档抽取的事实以自身 ID 独占一组，因为并列条目
+// 不是同一属性的不同时间点取值，混同会让 recall 把 15 台设备里的
+// 14 台标成"已被更新"。
+type group struct {
+	triple   models.Triple
+	distinct string
+}
+
+func groupOf(event models.Event) group {
+	if event.Kind == models.KindDocFact {
+		return group{distinct: event.ID}
+	}
+
+	return group{triple: event.Triple()}
 }
 
 // annotate 给检索结果补上当前值标注。
