@@ -43,11 +43,43 @@ interface WorldCharter {
   timeModel: "linear" | "branching" | "cyclic"
   // 真值基准：该世界内的裁决以什么为准
   truthBasis: "observation" | "canon" | "simulation" | "hybrid"
+  // 状态模型：该世界承认的状态变量及其依赖（见 §2.2）
+  stateModel?: StateModelRef
   supersedes?: string
 }
 ```
 
 宪章的裁决意义：**事实裁决机在 world 内路由判据**。real 世界以观测与共识为准；虚构世界以 canon 与文本证据为准；代码世界以"可运行的测试/编译/类型检查"为准（可计算的 oracle）。
+
+### 2.2 状态模型（StateModel）
+
+宪章除了声明"什么是真"，还须声明**什么会变、变了会影响什么**。
+这是状态推断（[05 §5.4](05-inference.md)）能做确定性推演的前提——
+没有这份声明，世界只能降级到条件检索或边界侧推断，可靠性显著下降。
+
+```ts
+StateModel = {
+  vars: StateVarDecl[]      // 受控状态变量：如 person#role、project#phase
+  deps: Dependency[]        // 变量依赖：某变量变化时，哪些维度需重新求值
+}
+
+StateVarDecl = { ref: StateVarRef; domain: Value[] | OntologyRef; description: string }
+Dependency   = { when: StateVarRef; affects: StateVarRef[]; rule?: RuleRef }
+```
+
+示例（real 世界 · 个人 scope）：
+
+```
+vars: person#role     ∈ {ic, manager, ceo, founder}
+      person#location ∈ {city, ...}
+deps: when person#role 变化     → affects [person#engagement_style, person#time_budget]
+      when person#location 变化 → affects [person#commute, person#timezone]
+```
+
+**分层的现实性**：`real` 世界开放度最高，状态模型只能覆盖可受控化的维度
+（角色、位置、项目阶段等）；代码世界接近完全可声明（模块依赖、版本阶段）；
+虚构世界取决于设定结构化程度。
+**未声明的维度不得被推断**——只能走 05 §5.4 的降级路径或弃答。
 
 ## 3. 实在性梯度（替代"真/假"二值）
 
